@@ -145,6 +145,21 @@ This repository uses a documented contribution workflow. See [CONTRIBUTING.md](C
 - [ ] Tests run successfully locally
 - [ ] Documentation updated when necessary
 
+## Makefile
+
+A `Makefile` at the repository root provides short aliases for common tasks. Run `make help` to list all targets:
+
+| Target | Description |
+|---|---|
+| `make install` | Install dependencies for frontend and backend |
+| `make dev` | Start backend and frontend in development mode |
+| `make build` | Build backend and frontend for production |
+| `make test` | Run all tests (contract, backend, frontend) |
+| `make lint` | Run ESLint and Prettier checks |
+| `make docker-up` | Start all services with Docker Compose |
+| `make docker-down` | Stop and remove Docker Compose services |
+| `make clean` | Remove build artifacts and node_modules |
+
 ## Development Scripts
 
 Run the following from the repository root:
