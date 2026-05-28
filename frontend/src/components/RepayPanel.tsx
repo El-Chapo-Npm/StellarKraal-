@@ -2,8 +2,9 @@
 import { useState } from "react";
 import { signTransaction } from "@/lib/freighterClient";
 import { submitSignedXdr } from "@/lib/stellarUtils";
-import { Input, Button } from "@/components/ui";
-import { useToast } from "@/components/toast";
+import { colors } from "@/lib/design-tokens";
+import Card from "@/components/Card";
+import Spinner from "@/components/Spinner";
 
 interface Props {
   walletAddress: string;
@@ -49,34 +50,43 @@ export default function RepayPanel({ walletAddress }: Props) {
   }
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow mb-4">
-      <h2 className="text-xl font-semibold text-brown-700 mb-4">Repay Loan</h2>
-      <div className="space-y-4">
-        <Input
-          label="Loan ID"
-          type="number"
-          placeholder="Enter your loan ID"
+    <Card
+      className="mb-4"
+      header={<h2 className={`text-xl font-semibold ${colors.text.primary}`}>Repay Loan</h2>}
+    >
+      <div className="space-y-3">
+        <input
+          className={`w-full ${colors.form.input} rounded-lg px-3 py-2 ${colors.text.primary} ${colors.form.placeholder}`}
+          placeholder="Loan ID"
           value={loanId}
           onChange={(e) => setLoanId(e.target.value)}
-          disabled={loading}
-        />
-        <Input
-          label="Amount (stroops)"
           type="number"
-          placeholder="Amount to repay"
+        />
+        <input
+          className={`w-full ${colors.form.input} rounded-lg px-3 py-2 ${colors.text.primary} ${colors.form.placeholder}`}
+          placeholder="Amount (stroops)"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          disabled={loading}
+          type="number"
         />
-        <Button
-          fullWidth
-          loading={loading}
-          disabled={!loanId || !amount}
+        <button
           onClick={repay}
+          disabled={loading}
+          className={`w-full ${colors.secondary.bg} ${colors.secondary.text} py-2.5 rounded-xl font-semibold ${colors.secondary.hover} transition ${colors.interactive.disabled} ${colors.interactive.focus} flex items-center justify-center gap-2`}
         >
-          {loading ? "Processing…" : "Repay"}
-        </Button>
+          {loading ? (
+            <>
+              <Spinner />
+              Processing…
+            </>
+          ) : "Repay"}
+        </button>
       </div>
-    </div>
+      {status && (
+        <p className={`text-sm mt-2 ${status.includes("❌") ? colors.status.error.text : colors.status.success.text}`}>
+          {status}
+        </p>
+      )}
+    </Card>
   );
 }

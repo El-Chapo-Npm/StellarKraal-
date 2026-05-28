@@ -2,7 +2,7 @@
 import { useWizard, AnimalType } from "@/context/LoanWizardContext";
 import { signTransaction } from "@/lib/freighterClient";
 import { submitSignedXdr } from "@/lib/stellarUtils";
-import { Input, Button } from "@/components/ui";
+import Spinner from "@/components/Spinner";
 
 const ANIMAL_TYPES: { value: AnimalType; label: string; emoji: string; desc: string }[] = [
   { value: "cattle", label: "Cattle", emoji: "🐄", desc: "High appraisal value" },
@@ -118,9 +118,20 @@ export default function StepCollateral({ walletAddress }: Props) {
         </div>
       )}
 
-      <Button fullWidth loading={loading} onClick={handleRegister}>
-        {loading ? "Registering on-chain…" : "Register & Continue →"}
-      </Button>
+      <button
+        onClick={handleRegister}
+        disabled={loading}
+        className="w-full bg-brown text-cream py-3 rounded-xl font-semibold hover:bg-brown/80 transition disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {loading ? (
+          <>
+            <Spinner />
+            Registering on-chain…
+          </>
+        ) : (
+          "Register & Continue →"
+        )}
+      </button>
     </div>
   );
 }
