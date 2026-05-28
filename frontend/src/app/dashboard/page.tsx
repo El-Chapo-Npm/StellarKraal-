@@ -59,19 +59,19 @@ export default function Dashboard() {
             <SkeletonHealthDashboard />
           ) : (
             <div className="mt-8 rounded-2xl bg-white p-6 shadow">
-              <h2 className="mb-3 text-xl font-semibold text-brown">
+              <h2 className="mb-3 text-xl font-semibold text-brown-700">
                 <GlossaryTerm termKey="healthFactor" />
               </h2>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
-                  className="flex-1 rounded-lg border border-brown/30 px-3 py-2"
+                  className="flex-1 rounded-xl border border-brown-300 px-4 py-3 text-brown-700 placeholder-brown-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold transition"
                   placeholder="Loan ID"
                   value={loanId}
                   onChange={(e) => setLoanId(e.target.value)}
                 />
                 <button
                   onClick={refreshHealth}
-                  className="rounded-lg bg-gold px-4 py-2 font-semibold text-brown transition hover:bg-gold/80"
+                  className="min-h-[44px] rounded-xl bg-gold-600 px-5 py-3 font-semibold text-cream-50 transition hover:bg-gold-700 focus:outline-none focus:ring-2 focus:ring-gold-600 focus:ring-offset-2"
                 >
                   Check
                 </button>
