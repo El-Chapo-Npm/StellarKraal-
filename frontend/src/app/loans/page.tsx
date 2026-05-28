@@ -1,10 +1,9 @@
-"use client";
-import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { motion, useReducedMotion } from "framer-motion";
-import SearchFilterBar from "@/components/SearchFilterBar";
-import PageTransition from "@/components/PageTransition";
-import { badgeVariants } from "@/lib/animations";
+'use client';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import SearchFilterBar from '@/components/SearchFilterBar';
+import PageTransition from '@/components/PageTransition';
+import StatusBadge from '@/components/StatusBadge';
 
 interface Loan {
   id: string;
@@ -14,17 +13,15 @@ interface Loan {
   createdAt: string;
 }
 
-const STATUS_OPTIONS = ["active", "repaid", "liquidated", "pending"];
+const STATUS_OPTIONS = ['active', 'repaid', 'liquidated', 'pending'];
 const TYPE_OPTIONS: string[] = [];
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 function LoanListContent() {
   const searchParams = useSearchParams();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
-  const reduced = useReducedMotion();
-
   useEffect(() => {
     setLoading(true);
     fetch(`${API}/api/loans`)
@@ -34,8 +31,8 @@ function LoanListContent() {
       .finally(() => setLoading(false));
   }, []);
 
-  const q = (searchParams.get("q") ?? "").toLowerCase();
-  const statuses = searchParams.getAll("status");
+  const q = (searchParams.get('q') ?? '').toLowerCase();
+  const statuses = searchParams.getAll('status');
 
   const filtered = loans.filter((loan) => {
     const matchesQuery =
@@ -72,23 +69,7 @@ function LoanListContent() {
               </div>
               <div className="text-right">
                 <p className="text-sm font-medium text-brown">{loan.amount.toLocaleString()}</p>
-                <motion.span
-                  key={loan.status}
-                  variants={reduced ? undefined : badgeVariants}
-                  initial="initial"
-                  animate="animate"
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    loan.status === "active"
-                      ? "bg-green-100 text-green-800"
-                      : loan.status === "repaid"
-                      ? "bg-blue-100 text-blue-800"
-                      : loan.status === "liquidated"
-                      ? "bg-red-100 text-red-800"
-                      : "bg-gray-100 text-gray-700"
-                  }`}
-                >
-                  {loan.status}
-                </motion.span>
+                <StatusBadge status={loan.status} />
               </div>
             </li>
           ))}
@@ -101,12 +82,12 @@ function LoanListContent() {
 export default function LoansPage() {
   return (
     <PageTransition>
-    <main className="max-w-3xl mx-auto px-4 py-10">
-      <h1 className="text-3xl font-bold text-brown mb-6">Loans</h1>
-      <Suspense fallback={<p className="text-brown/60 text-sm">Loading…</p>}>
-        <LoanListContent />
-      </Suspense>
-    </main>
+      <main className="max-w-3xl mx-auto px-4 py-10">
+        <h1 className="text-3xl font-bold text-brown mb-6">Loans</h1>
+        <Suspense fallback={<p className="text-brown/60 text-sm">Loading…</p>}>
+          <LoanListContent />
+        </Suspense>
+      </main>
     </PageTransition>
   );
 }
