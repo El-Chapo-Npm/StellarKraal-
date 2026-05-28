@@ -1,6 +1,11 @@
 import request from "supertest";
 import app from "../src/index";
 
+// Mock uuid
+jest.mock("uuid", () => ({
+  v4: jest.fn(() => "test-request-id-12345"),
+}));
+
 // Mock stellar-sdk to avoid real network calls
 jest.mock("@stellar/stellar-sdk", () => {
   const actual = jest.requireActual("@stellar/stellar-sdk");
@@ -8,6 +13,7 @@ jest.mock("@stellar/stellar-sdk", () => {
     ...actual,
     Networks: { TESTNET: "Test SDF Network ; September 2015", PUBLIC: "Public Global Stellar Network ; September 2015" },
     BASE_FEE: "100",
+    StrKey: actual.StrKey, // Use actual StrKey for validation
     Contract: jest.fn().mockImplementation(() => ({
       call: jest.fn().mockReturnValue({ type: "invokeHostFunction" }),
     })),
