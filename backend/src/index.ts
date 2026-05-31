@@ -13,6 +13,8 @@ import {
   softDeleteLoan,
 } from "./db/store";
 import { corsMiddleware } from "./middleware/cors";
+import { correlationMiddleware } from "./middleware/correlation";
+import { loggingMiddleware } from "./middleware/logging";
 import {
   Networks,
   TransactionBuilder,
@@ -37,7 +39,7 @@ import {
 } from "./utils/appraisalCache";
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { globalLimiter, authLimiter } from "./middleware/rateLimit";
+import { globalLimiter, authLimiter, readLimiter } from "./middleware/rateLimit";
 import { asyncHandler } from "./utils/asyncHandler";
 import { stellarPublicKeySchema } from "./validators/stellar";
 import rpcClient from "./utils/rpcClient";
@@ -114,11 +116,16 @@ app.get("/api/health", async (_req: Request, res: Response) => {
 
 app.use(globalLimiter);
 app.use(timeoutMiddleware(parseInt(config.TIMEOUT_GLOBAL_MS, 10)));
+app.use(correlationMiddleware);
+app.use(loggingMiddleware);
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 // Request ID middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const requestId = randomUUID();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (req as any).requestId = requestId;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (req as any).logger = createRequestLogger(requestId);
   res.setHeader("X-Request-ID", requestId);
   next();
@@ -139,6 +146,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const reqLogger = (req as any).logger;
   reqLogger.info(`${req.method} ${req.path}`, {
     method: req.method,
@@ -334,6 +342,7 @@ async function buildContractTx(
 // GET /api/health - Health check endpoint
 app.get(
   "/api/health",
+  readLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const uptime = Math.floor((Date.now() - startTime) / 1000);
@@ -485,6 +494,7 @@ app.post(
 // Deprecated: unpaginated usage will be removed in a future version.
 app.get(
   "/api/loans",
+  readLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
     const limitRaw = req.query.limit !== undefined ? Number(req.query.limit) : 20;
@@ -504,6 +514,7 @@ app.get(
 // GET /api/loan/:id
 app.get(
   "/api/loan/:id",
+  readLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const contract = new Contract(CONTRACT_ID);
@@ -524,6 +535,7 @@ app.get(
         .build();
 
       const result = await rpcClient.simulateTransaction(tx);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       res.json({ result: (result as any).result?.retval });
     } catch (error) {
       next(error);
@@ -554,6 +566,7 @@ app.get(
         .build();
 
       const result = await rpcClient.simulateTransaction(tx);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       res.json({ health_factor: (result as any).result?.retval });
     } catch (error) {
       next(error);
@@ -627,6 +640,81 @@ app.delete("/api/collateral/:id", (req: Request, res: Response) => {
   if (!ok) return res.status(404).json({ error: "Record not found" });
   res.json({ deleted: true, id: req.params.id });
 });
+
+// ── POST /api/collateral — animal registration with image upload ──────────────
+
+const uploadsDir = path.join(__dirname, "..", "uploads");
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => cb(null, `${randomUUID()}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Only image files are allowed"));
+  },
+});
+
+// Ensure uploads directory exists
+mkdirSync(uploadsDir, { recursive: true });
+
+app.post(
+  "/api/collateral",
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  writeLimiter,
+  upload.single("image"),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { species, breed, age, weight } = req.body as {
+      species?: string;
+      breed?: string;
+      age?: string;
+      weight?: string;
+    };
+
+    if (!species || typeof species !== "string" || species.trim() === "") {
+      return res.status(400).json({ error: "species is required" });
+    }
+    if (!breed || typeof breed !== "string" || breed.trim() === "") {
+      return res.status(400).json({ error: "breed is required" });
+    }
+    const ageNum = Number(age);
+    if (!age || !Number.isFinite(ageNum) || ageNum < 0) {
+      return res.status(400).json({ error: "age must be a non-negative number" });
+    }
+    const weightNum = Number(weight);
+    if (!weight || !Number.isFinite(weightNum) || weightNum <= 0) {
+      return res.status(400).json({ error: "weight must be a positive number" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: "image file is required" });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const owner = (req as any).user?.publicKey as string | undefined;
+    if (!owner) {
+      return res.status(401).json({ error: "Authenticated wallet address required" });
+    }
+
+    const imageUrl = `/uploads/${req.file.filename}`;
+    const appraised_value = Math.round(weightNum * 100); // simple appraisal: 100 per kg
+
+    const record = insertCollateral({
+      id: randomUUID(),
+      owner,
+      animal_type: species.trim(),
+      count: 1,
+      appraised_value,
+      species: species.trim(),
+      breed: breed.trim(),
+      age: ageNum,
+      weight: weightNum,
+      image_url: imageUrl,
+    });
+
+    res.status(201).json(record);
+  }),
+);
 
 // ── v1 collateral CRUD ────────────────────────────────────────────────────────
 
@@ -756,6 +844,43 @@ app.get(
       return res.status(404).json({ error: "Transaction not found" });
     }
     res.json(transaction);
+  }),
+);
+
+// PUT /api/loans/:id/repay — record a repayment against a loan
+app.put(
+  "/api/loans/:id/repay",
+  timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_MS, 10)),
+  writeLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { amount, transactionHash } = req.body as { amount?: unknown; transactionHash?: unknown };
+
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "amount must be a positive number" });
+    }
+    if (typeof transactionHash !== "string" || !transactionHash) {
+      return res.status(400).json({ error: "transactionHash is required" });
+    }
+
+    const loan = getLoan(req.params.id);
+    if (!loan) return res.status(404).json({ error: "Loan not found" });
+
+    if (amount > loan.outstanding_balance) {
+      return res.status(400).json({ error: "amount exceeds outstanding balance" });
+    }
+
+    const newBalance = loan.outstanding_balance - amount;
+    const updated = updateLoan(req.params.id, { outstanding_balance: newBalance });
+
+    insertTransaction({
+      borrower: loan.borrower,
+      type: "repayment",
+      status: "completed",
+      amount,
+      loanId: loan.id,
+    });
+
+    res.json(updated);
   }),
 );
 

@@ -13,6 +13,11 @@ export interface CollateralRecord {
   animal_type: string;
   count: number;
   appraised_value: number;
+  species?: string;
+  breed?: string;
+  age?: number;
+  weight?: number;
+  image_url?: string;
   createdAt: string;
   deletedAt: string | null;
 }
@@ -161,12 +166,21 @@ export function listLoans(filters?: {
 
 /**
  * Fetch a single loan record by ID (excludes soft-deleted records).
- * @param id - Loan record ID.
- * @returns The {@link LoanRecord} or `undefined` if not found or deleted.
  */
 export function getLoan(id: string): LoanRecord | undefined {
   const r = loanTable.get(id);
   return r && r.deletedAt === null ? r : undefined;
+}
+
+/**
+ * Update fields on an existing loan record.
+ */
+export function updateLoan(id: string, updates: Partial<Omit<LoanRecord, "id" | "createdAt">>): LoanRecord | undefined {
+  const record = loanTable.get(id);
+  if (!record) return undefined;
+  const updated = { ...record, ...updates };
+  loanTable.set(id, updated);
+  return updated;
 }
 
 /**
