@@ -1,11 +1,13 @@
 'use client';
-import { Suspense, useEffect, useState, useCallback } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import SearchFilterBar from '@/components/SearchFilterBar';
 import PageTransition from '@/components/PageTransition';
 import Card from '@/components/Card';
 import SkeletonCollateralCard from '@/components/SkeletonCollateralCard';
-import { Button } from '@/components/ui/Button';
+import EmptyState from '@/components/EmptyState';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 
 interface Collateral {
   id: string;
@@ -82,6 +84,9 @@ function CollateralListContent() {
     router.push(`?${params.toString()}`);
   };
 
+  const { page, limit, totalPages, setPage, setLimit, slice } = usePagination(filtered.length);
+  const paginated = slice(filtered);
+
   return (
     <div className="space-y-4">
       <SearchFilterBar
@@ -104,15 +109,20 @@ function CollateralListContent() {
             </li>
           ))}
         </ul>
-      ) : items.length === 0 ? (
-        <div className="rounded-lg bg-brown-50 border border-brown-200 p-8 text-center">
-          <p className="text-brown-600 font-medium">No collateral found</p>
-          <p className="text-brown-500 text-sm mt-1">Try adjusting your filters or search terms</p>
-        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon="🐄"
+          heading={q || types.length > 0 ? 'No Collateral Found' : 'No Collateral Registered'}
+          message={
+            q || types.length > 0
+              ? 'Try adjusting your search or filters to find collateral.'
+              : 'No collateral has been registered yet. Register your livestock to get started.'
+          }
+        />
       ) : (
         <>
           <ul className="space-y-2">
-            {items.map((col) => (
+            {paginated.map((col) => (
               <li key={col.id}>
                 <Card>
                   <div className="flex justify-between items-center">
@@ -133,34 +143,13 @@ function CollateralListContent() {
               </li>
             ))}
           </ul>
-
-          {/* Pagination */}
-          {meta.pages > 1 && (
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-sm text-brown-600">
-                Showing {(page - 1) * limit + 1} to {Math.min(page * limit, meta.total)} of{' '}
-                {meta.total}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={page === 1}
-                  onClick={() => handlePageChange(page - 1)}
-                >
-                  ← Previous
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={page === meta.pages}
-                  onClick={() => handlePageChange(page + 1)}
-                >
-                  Next →
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            limit={limit}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
+          />
         </>
       )}
     </div>
