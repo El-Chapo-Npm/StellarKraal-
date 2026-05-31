@@ -181,11 +181,11 @@ const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE =
   config.NEXT_PUBLIC_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
-const APP_VERSION = process.env.npm_package_version || "1.0.0";
+const APP_VERSION = process.env["npm_package_version"] || "1.0.0";
 const startTime = Date.now();
 
 // Configure appraisal cache TTL from env
-configureCacheTTL(parseInt(config.APPRAISAL_CACHE_TTL_MS, 10));
+configureCacheTTL(config.APPRAISAL_CACHE_TTL_MS);
 
 // Run DB migrations on startup (automatic in development, manual in production)
 (async () => {
