@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { signTransaction } from "@stellar/freighter-api";
 import { submitSignedXdr } from "@/lib/stellarUtils";
+import Tooltip from "@/components/Tooltip";
 
 interface Props {
   walletAddress: string;
@@ -73,13 +74,15 @@ export default function RepayPanel({
           onChange={(e) => setAmount(e.target.value)}
           type="number"
         />
-        <button
-          onClick={repay}
-          disabled={loading}
-          className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50"
-        >
-          {loading ? "Processing…" : "Repay"}
-        </button>
+        <Tooltip hint="R — Repay loan">
+          <button
+            onClick={repay}
+            disabled={loading}
+            className="w-full bg-gold text-brown py-2.5 rounded-xl font-semibold hover:bg-gold/80 transition disabled:opacity-50"
+          >
+            {loading ? "Processing…" : "Repay"}
+          </button>
+        </Tooltip>
       </div>
       {status && <p className="text-sm mt-2">{status}</p>}
     </div>
