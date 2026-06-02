@@ -49,6 +49,7 @@ import {
   invalidateAll,
   configureCacheTTL,
 } from "./utils/appraisalCache";
+import { responseCacheMiddleware, invalidateCache } from "./utils/responseCache";
 import { randomUUID } from "crypto";
 import path from "path";
 import { mkdirSync } from "fs";
@@ -446,6 +447,7 @@ app.post(
       nativeToScVal(BigInt(amount), { type: "i128" }),
     ]);
     fireWebhooks("loan.approved", { borrower, collateral_id, amount });
+    invalidateCache("/api/loans");
     res.json({ xdr: xdrTx, ...(cached?.stale ? { stale: true } : {}) });
   }),
 );
@@ -624,6 +626,7 @@ app.post(
 app.get(
   "/api/loans",
   readLimiter,
+  responseCacheMiddleware,
   asyncHandler(async (req: Request, res: Response) => {
     const pageRaw = req.query.page !== undefined ? Number(req.query.page) : 1;
     const pageSizeVal = req.query.pageSize !== undefined ? req.query.pageSize : req.query.limit;
@@ -665,6 +668,7 @@ const collateralQuerySchema = z.object({
 
 app.get(
   "/api/collateral",
+  responseCacheMiddleware,
   asyncHandler(async (req: Request, res: Response) => {
     const validation = collateralQuerySchema.safeParse(req.query);
     if (!validation.success) {
@@ -1055,6 +1059,7 @@ app.post(
       image_url: imageUrl,
     });
 
+    invalidateCache("/api/collateral");
     res.status(201).json(record);
   }),
 );
@@ -1076,6 +1081,7 @@ app.post("/api/v1/collateral", timeoutMiddleware(parseInt(config.TIMEOUT_WRITE_M
   }
   const { owner, animal_type, count, appraised_value } = validation.data;
   const record = insertCollateral({ id: randomUUID(), owner, animal_type, count, appraised_value });
+  invalidateCache("/api/collateral");
   res.status(201).json(record);
 }));
 
@@ -1211,6 +1217,7 @@ app.put(
 
     const newBalance = loan.outstanding_balance - amount;
     const updated = updateLoan(req.params.id, { outstanding_balance: newBalance });
+    invalidateCache("/api/loans");
 
     insertTransaction({
       borrower: loan.borrower,
