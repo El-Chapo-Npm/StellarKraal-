@@ -1,4 +1,4 @@
-# StellarKraal
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/f2bc985e-5703-492f-937f-65c188658020" /># StellarKraal
 
 [![CI](https://img.shields.io/github/actions/workflow/status/teslims2/StellarKraal-/backend-ci.yml?branch=main&label=backend%20CI)](https://github.com/teslims2/StellarKraal-/actions/workflows/backend-ci.yml)
 [![CI](https://img.shields.io/github/actions/workflow/status/teslims2/StellarKraal-/frontend-ci.yml?branch=main&label=frontend%20CI)](https://github.com/teslims2/StellarKraal-/actions/workflows/frontend-ci.yml)
@@ -9,7 +9,7 @@
 
 <img width="1920" height="1080" alt="Screenshot from 2026-06-08 19-30-10" src="https://github.com/user-attachments/assets/c7d2183f-9971-47f0-8391-d14488a69ff0" />
 
-
+link to website https://kraal-bloom-connect.lovable.app/
 
 ## Project Overview
 
