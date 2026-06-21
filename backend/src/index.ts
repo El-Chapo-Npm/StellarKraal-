@@ -27,6 +27,7 @@ import {
 import { corsMiddleware } from "./middleware/cors";
 import { correlationMiddleware } from "./middleware/correlation";
 import { loggingMiddleware } from "./middleware/logging";
+import { requestIdMiddleware } from "./middleware/requestId";
 import {
   Networks,
   TransactionBuilder,
@@ -129,7 +130,7 @@ app.get("/api/health", async (_req: Request, res: Response) => {
     await pool.run((server) => server.getHealth());
     rpcReachable = true;
   } catch (error) {
-    console.warn("RPC health check failed:", (error as Error).message);
+    logger.warn("RPC health check failed", { error: (error as Error).message });
   }
   const status = dbHealthy && rpcReachable ? "healthy" : "degraded";
   res.status(dbHealthy && rpcReachable ? 200 : 503).json({
@@ -149,14 +150,11 @@ app.use(correlationMiddleware);
 app.use(loggingMiddleware);
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
-// Request ID middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const requestId = randomUUID();
+// Request ID + per-request logger
+app.use(requestIdMiddleware);
+app.use((req: Request, _res: Response, next: NextFunction) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (req as any).requestId = requestId;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (req as any).logger = createRequestLogger(requestId);
-  res.setHeader("X-Request-ID", requestId);
+  (req as any).logger = createRequestLogger(req.requestId!);
   next();
 });
 
