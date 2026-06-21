@@ -28,6 +28,8 @@ import {
 import { corsMiddleware } from "./middleware/cors";
 import { correlationMiddleware } from "./middleware/correlation";
 import { loggingMiddleware } from "./middleware/logging";
+import { requestIdMiddleware } from "./middleware/requestId";
+import { getIdempotencyEntry, setIdempotencyEntry } from "./middleware/idempotency";
 import {
   Networks,
   TransactionBuilder,
@@ -85,27 +87,6 @@ function track5xx() {
   }
 }
 
-// ── Idempotency cache (in-memory, 24h TTL) ───────────────────────────────────
-interface IdempotencyEntry {
-  status: number;
-  body: unknown;
-  createdAt: number;
-}
-const idempotencyCache = new Map<string, IdempotencyEntry>();
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
-function getIdempotencyEntry(key: string): IdempotencyEntry | undefined {
-  const entry = idempotencyCache.get(key);
-  if (!entry) return undefined;
-  if (Date.now() - entry.createdAt > IDEMPOTENCY_TTL_MS) {
-    idempotencyCache.delete(key);
-    return undefined;
-  }
-  return entry;
-}
-function setIdempotencyEntry(key: string, status: number, body: unknown): void {
-  idempotencyCache.set(key, { status, body, createdAt: Date.now() });
-}
-
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 const NETWORK_PASSPHRASE =
   config.NEXT_PUBLIC_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
@@ -131,7 +112,7 @@ app.get("/api/health", async (_req: Request, res: Response) => {
     await pool.run((server) => server.getHealth());
     rpcReachable = true;
   } catch (error) {
-    console.warn("RPC health check failed:", (error as Error).message);
+    logger.warn("RPC health check failed", { error: (error as Error).message });
   }
   const status = dbHealthy && rpcReachable ? "healthy" : "degraded";
   res.status(dbHealthy && rpcReachable ? 200 : 503).json({
@@ -152,8 +133,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (req as any).requestId = requestId;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (req as any).logger = createRequestLogger(requestId);
-  res.setHeader("X-Request-ID", requestId);
+  (req as any).logger = createRequestLogger(req.requestId!);
   next();
 });
 app.use(globalLimiter);
