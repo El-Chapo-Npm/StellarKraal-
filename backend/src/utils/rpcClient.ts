@@ -86,11 +86,13 @@ const getHealthBreaker = new CircuitBreaker(
     logger.info("Circuit breaker closed", { breaker: breaker.name });
   });
 
-  breaker.on("failure", (error: Error) => {
-    fireAlert(rules.rpcFailure, `RPC call failed: ${error.message}`, {
+  breaker.on("fallback", (result: unknown, error: Error) => {
+    const msg = error?.message ?? String(result);
+    fireAlert(rules.rpcFailure, `RPC call failed: ${msg}`, {
       breaker: breaker.name,
-      error: error.message,
+      error: msg,
     });
+    logger.warn(`RPC call failed: ${msg}`, { breaker: breaker.name, error: msg });
   });
 });
 
@@ -104,7 +106,8 @@ export const rpcClient = {
   getHealth: () => getHealthBreaker.fire(),
   
   /**
-   * Get circuit breaker states for health check
+   * Get circuit breaker states for health check.
+   * @returns An object mapping each RPC method to its circuit breaker state.
    */
   getCircuitStates: () => ({
     getAccount: getAccountBreaker.opened ? "open" : "closed",
@@ -114,7 +117,8 @@ export const rpcClient = {
   }),
 
   /**
-   * Check if any circuit is open
+   * Check if any circuit is open.
+   * @returns True if all circuit breakers are closed, false if any is open.
    */
   isHealthy: () => {
     return (

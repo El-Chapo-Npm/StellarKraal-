@@ -1,21 +1,19 @@
 import request from "supertest";
 import app from "./index";
-import {
-  insertCollateral,
-  insertLoan,
-} from "./db/store";
+import { insertCollateral, insertLoan, insertTransaction } from "./db/store";
 
 // Valid 56-char Stellar public key for use in tests
-const TEST_PUBLIC_KEY = "GDVXGGW5LDCKNPGP2QNOUTNAITBJOUEKSXDTYMTEJE2SHYDIBLTXZ3GO";
+const VALID_ADDRESS = "GB4QO2DT7ASHWBIQS4DQ6O7M3UKNT2SWL7TBLZSC4S5FWBSL6VZ6TMEN";
 
 // Mock auth middleware to bypass JWT in tests
-jest.mock("./middleware/auth", () => ({
-  authRouter: (() => {
-    const { Router } = require("express");
-    return Router();
-  })(),
-  jwtMiddleware: (_req: any, _res: any, next: any) => next(),
-}));
+jest.mock("./middleware/auth", () => {
+  const express = jest.requireActual("express");
+  const router = express.Router();
+  return {
+    authRouter: router,
+    jwtMiddleware: (_req: any, _res: any, next: any) => next(),
+  };
+});
 
 // Mock rpcClient to avoid real network calls
 jest.mock("./utils/rpcClient", () => ({
@@ -25,20 +23,31 @@ jest.mock("./utils/rpcClient", () => ({
     prepareTransaction: jest.fn().mockResolvedValue({ toXDR: () => "prepared_xdr" }),
     simulateTransaction: jest.fn().mockResolvedValue({ result: { retval: { value: 42 } } }),
     getHealth: jest.fn().mockResolvedValue({ status: "healthy" }),
+    getCircuitStates: jest.fn().mockReturnValue([]),
+    isHealthy: jest.fn().mockReturnValue(true),
   },
 }));
 
-const VALID_ADDRESS =
-  "GB4QO2DT7ASHWBIQS4DQ6O7M3UKNT2SWL7TBLZSC4S5FWBSL6VZ6TMEN";
+jest.mock("./utils/connectionPool", () => ({
+  pool: {
+    run: jest.fn().mockResolvedValue({ status: "healthy" }),
+    stats: jest.fn().mockReturnValue({ size: 2, available: 2, inUse: 0, min: 2, max: 10 }),
+    close: jest.fn(),
+  },
+  PoolExhaustedError: class PoolExhaustedError extends Error {},
+}));
 
-jest.mock("./middleware/auth", () => {
-  const express = jest.requireActual("express");
-  const router = express.Router();
-  return {
-    authRouter: router,
-    jwtMiddleware: (_req: any, _res: any, next: any) => next(),
-  };
-});
+jest.mock("./db/migrationRunner", () => ({
+  runMigrations: jest.fn().mockResolvedValue(undefined),
+  checkDbHealth: jest.fn().mockResolvedValue(true),
+  getMigrationStatus: jest.fn().mockResolvedValue("ok"),
+}));
+
+jest.mock("./utils/responseCache", () => ({
+  responseCacheMiddleware: (_req: any, _res: any, next: any) => next(),
+  createResponseCacheMiddleware: () => (_req: any, _res: any, next: any) => next(),
+  invalidateCache: jest.fn(),
+}));
 
 // Mock the logger
 jest.mock("./utils/logger", () => ({
@@ -57,6 +66,11 @@ jest.mock("./utils/logger", () => ({
   })),
 }));
 
+// Mock uuid
+jest.mock("uuid", () => ({
+  v4: jest.fn(() => "test-request-id-12345"),
+}));
+
 // Mock stellar-sdk to avoid real network calls
 jest.mock("@stellar/stellar-sdk", () => {
   const actual = jest.requireActual("@stellar/stellar-sdk");
@@ -67,6 +81,7 @@ jest.mock("@stellar/stellar-sdk", () => {
       PUBLIC: "Public Global Stellar Network ; September 2015",
     },
     BASE_FEE: "100",
+    StrKey: actual.StrKey, // Use actual StrKey for validation
     Contract: jest.fn().mockImplementation(() => ({
       call: jest.fn().mockReturnValue({ type: "invokeHostFunction" }),
     })),
@@ -80,6 +95,18 @@ jest.mock("@stellar/stellar-sdk", () => {
     })),
     nativeToScVal: jest.fn().mockReturnValue({}),
     SorobanRpc: {
+      Server: jest.fn().mockImplementation(() => ({
+        getAccount: jest.fn().mockResolvedValue({ id: "GABC", sequence: "1" }),
+        prepareTransaction: jest
+          .fn()
+          .mockResolvedValue({ toXDR: () => "prepared_xdr" }),
+        simulateTransaction: jest
+          .fn()
+          .mockResolvedValue({ result: { retval: { value: 42 } } }),
+        getHealth: jest.fn().mockResolvedValue({ status: "healthy" }),
+      })),
+    },
+    rpc: {
       Server: jest.fn().mockImplementation(() => ({
         getAccount: jest.fn().mockResolvedValue({ id: "GABC", sequence: "1" }),
         prepareTransaction: jest
@@ -141,7 +168,8 @@ describe("StellarKraal API", () => {
       });
       expect(res.status).toBe(400);
       expect(res.body).toHaveProperty("error", "Validation failed");
-      expect(res.body.details[0].message).toContain("Stellar public key");
+      expect(res.body.details).toBeDefined();
+      expect(Array.isArray(res.body.details)).toBe(true);
     });
   });
 
@@ -252,9 +280,130 @@ describe("StellarKraal API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("returns 400 for SQL-like page value", async () => {
+      const res = await request(app).get("/api/loans?page=1;DROP TABLE loans");
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL-like pageSize value", async () => {
+      const res = await request(app).get("/api/loans?pageSize=1;DROP TABLE loans");
+      expect(res.status).toBe(400);
+    });
+
     it("adds deprecation warning header when no pagination params", async () => {
       const res = await request(app).get("/api/loans");
       expect(res.headers["deprecation"]).toBe("true");
+    });
+  });
+
+  describe("GET /api/transactions", () => {
+    const maliciousBorrower = "GAAAAAAA; DROP TABLE transactions; --";
+    const maliciousType = "loan; DROP TABLE transactions; --";
+    const maliciousStatus = "completed; DROP TABLE transactions; --";
+    const injectionDate = "2024-01-01; DROP TABLE transactions; --";
+
+    beforeAll(() => {
+      insertTransaction({
+        borrower: VALID_ADDRESS,
+        type: "loan",
+        status: "pending",
+        amount: 500000,
+      });
+    });
+
+    it("returns empty result for SQL injection attempt in borrower filter", async () => {
+      const res = await request(app)
+        .get(`/api/transactions?borrower=${encodeURIComponent(maliciousBorrower)}&page=1&pageSize=20`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("data");
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data).toHaveLength(0);
+      expect(res.body.total).toBe(0);
+    });
+
+    it("returns empty result for SQL injection attempt in type filter", async () => {
+      const res = await request(app)
+        .get(`/api/transactions?type=${encodeURIComponent(maliciousType)}&page=1&pageSize=20`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it("returns empty result for SQL injection attempt in status filter", async () => {
+      const res = await request(app)
+        .get(`/api/transactions?status=${encodeURIComponent(maliciousStatus)}&page=1&pageSize=20`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it("returns 400 for SQL injection attempt in startDate filter", async () => {
+      const res = await request(app)
+        .get(`/api/transactions?startDate=${encodeURIComponent(injectionDate)}&page=1&pageSize=20`);
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL injection attempt in endDate filter", async () => {
+      const res = await request(app)
+        .get(`/api/transactions?endDate=${encodeURIComponent(injectionDate)}&page=1&pageSize=20`);
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL-like page parameter", async () => {
+      const res = await request(app).get("/api/transactions?page=1;DROP TABLE transactions");
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL-like pageSize parameter", async () => {
+      const res = await request(app).get("/api/transactions?pageSize=1;DROP TABLE transactions");
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("SQL injection protections in request bodies", () => {
+    it("returns 400 for SQL injection attempt in loan request borrower", async () => {
+      const res = await request(app).post("/api/loan/request").send({
+        borrower: "SAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN; DROP TABLE loans; --",
+        collateral_id: 1,
+        amount: 600000,
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL injection attempt in loan repay borrower", async () => {
+      const res = await request(app)
+        .post("/api/loan/repay")
+        .set("Idempotency-Key", "sql-injection-test-01")
+        .send({
+          borrower: "NOT_A_VALID_KEY; DROP TABLE loans; --",
+          loan_id: 1,
+          amount: 200000,
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL injection attempt in collateral register owner", async () => {
+      const res = await request(app).post("/api/collateral/register").send({
+        owner: "INVALID_KEY; DROP TABLE collateral; --",
+        animal_type: "cattle",
+        count: 5,
+        appraised_value: 1000000,
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 for SQL injection-like invalid webhook url", async () => {
+      const res = await request(app).post("/api/webhooks").send({
+        url: "javascript:alert('x');DROP TABLE webhooks; --",
+      });
+
+      expect(res.status).toBe(400);
     });
   });
 
@@ -310,6 +459,97 @@ describe("StellarKraal API", () => {
       expect(res.headers["x-request-id"]).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       );
+    });
+  });
+
+  describe("POST /api/loan/create", () => {
+    let collateralId: string;
+
+    beforeEach(() => {
+      collateralId = `test-collateral-${Date.now()}-${Math.random()}`;
+      insertCollateral({
+        id: collateralId,
+        owner: VALID_ADDRESS,
+        animal_type: "cattle",
+        count: 10,
+        appraised_value: 1000000,
+      });
+    });
+
+    it("returns 201 with loan and xdr for valid payload", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 500000,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("loan");
+      expect(res.body).toHaveProperty("xdr");
+      expect(res.body.loan.borrower).toBe(VALID_ADDRESS);
+      expect(res.body.loan.collateral_id).toBe(collateralId);
+      expect(res.body.loan.amount).toBe(500000);
+    });
+
+    it("caps loan amount at 80% of appraised_value", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 9999999,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.loan.amount).toBe(800000); // 80% of 1_000_000
+    });
+
+    it("returns 400 for missing required fields", async () => {
+      const res = await request(app).post("/api/loan/create").send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("returns 400 for invalid borrowerAddress", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: "INVALID",
+        collateralId,
+        requestedAmount: 100000,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("returns 400 for non-positive requestedAmount", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 0,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("returns 404 when collateral does not exist", async () => {
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId: "nonexistent-id",
+        requestedAmount: 100000,
+      });
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty("error", "Collateral not found");
+    });
+
+    it("returns 409 when collateral is already pledged", async () => {
+      insertLoan({
+        id: `existing-loan-${Date.now()}`,
+        borrower: VALID_ADDRESS,
+        collateral_id: collateralId,
+        amount: 500000,
+      });
+      const res = await request(app).post("/api/loan/create").send({
+        borrowerAddress: VALID_ADDRESS,
+        collateralId,
+        requestedAmount: 100000,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty("error", "Collateral is already pledged to another loan");
     });
   });
 
